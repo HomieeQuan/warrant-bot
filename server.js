@@ -1,6 +1,9 @@
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 3000;
 require('dotenv').config();
 
 // Create Discord client
@@ -73,3 +76,12 @@ process.on('unhandledRejection', error => {
 
 // Login to Discord
 client.login(process.env.DISCORD_TOKEN);
+
+
+app.get('/', (req, res) => {
+    res.send('🤖 FBI Warrant Bot is running!');
+});
+
+app.listen(port, () => {
+    console.log(`🌐 Web server running on port ${port}`);
+});
