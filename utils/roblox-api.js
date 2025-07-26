@@ -41,6 +41,7 @@ async function getCsrfToken() {
     if (!roblosecurityCookie) return null;
     
     try {
+        console.log('🔑 Getting CSRF token...');
         await axios.post('https://auth.roblox.com/v2/logout', {}, {
             headers: {
                 'Cookie': `.ROBLOSECURITY=${roblosecurityCookie}`
@@ -50,8 +51,10 @@ async function getCsrfToken() {
     } catch (error) {
         if (error.response?.headers?.['x-csrf-token']) {
             csrfToken = error.response.headers['x-csrf-token'];
+            console.log('✅ CSRF token obtained');
             return csrfToken;
         }
+        console.log('❌ Failed to get CSRF token:', error.message);
     }
     return null;
 }
@@ -62,6 +65,7 @@ async function getCsrfToken() {
 async function checkCookieHealth() {
     if (!roblosecurityCookie) {
         cookieStatus = 'missing';
+        console.log('❌ No ROBLOSECURITY cookie found');
         return false;
     }
 
@@ -71,6 +75,7 @@ async function checkCookieHealth() {
             await getCsrfToken();
         }
 
+        console.log('🔍 Testing cookie with authenticated endpoint...');
         // Test with authenticated user info endpoint
         const response = await axios.get('https://users.roblox.com/v1/users/authenticated', {
             headers: getAuthHeaders(),
@@ -81,6 +86,7 @@ async function checkCookieHealth() {
             lastAuthSuccess = new Date();
             authFailureCount = 0;
             cookieStatus = 'healthy';
+            console.log(`✅ Cookie is healthy! Authenticated as user ${response.data.id} (${response.data.name})`);
             return true;
         }
     } catch (error) {
@@ -88,11 +94,12 @@ async function checkCookieHealth() {
         
         if (error.response?.status === 401) {
             cookieStatus = 'expired';
+            console.log('🚨 COOKIE EXPIRED! Need to get a new one from Roblox');
         } else {
             cookieStatus = 'error';
+            console.log(`❌ Cookie test failed: ${error.message}`);
         }
         
-        console.log(`🚨 Cookie health check failed (${authFailureCount} failures)`);
         return false;
     }
     
@@ -117,11 +124,11 @@ function getCookieStatus() {
 
 /**
  * Get Roblox User ID from username using search API
- * @param {string} username - The Roblox username
- * @returns {Promise<number|null>} - User ID or null if not found
  */
 async function getRobloxUserId(username) {
     try {
+        console.log(`🔍 Looking up username: ${username}`);
+        
         // Try the search method first
         const searchResponse = await axios.get(
             `https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(username)}&limit=10`,
@@ -135,39 +142,48 @@ async function getRobloxUserId(username) {
             );
             
             if (exactMatch) {
+                console.log(`✅ Found user: ${exactMatch.name} (ID: ${exactMatch.id})`);
                 return exactMatch.id;
             }
             
             // If no exact match, use the first result
             const firstResult = searchResponse.data.data[0];
+            console.log(`⚠️ Using closest match: ${firstResult.name} (ID: ${firstResult.id})`);
             return firstResult.id;
         }
 
         // Fallback to the old usernames method
+        console.log('🔄 Trying fallback username API...');
         const usernamesResponse = await axios.post('https://users.roblox.com/v1/usernames/users', {
             usernames: [username],
             excludeBannedUsers: false
         }, { headers: robloxHeaders, timeout: 10000 });
         
         if (usernamesResponse.data.data && usernamesResponse.data.data.length > 0) {
-            return usernamesResponse.data.data[0].id;
+            const userId = usernamesResponse.data.data[0].id;
+            console.log(`✅ Found via fallback: ${username} (ID: ${userId})`);
+            return userId;
         }
         
+        console.log(`❌ User not found: ${username}`);
         return null;
     } catch (error) {
+        console.log(`❌ Error looking up ${username}: ${error.message}`);
         return null;
     }
 }
 
 /**
- * Get player presence data with authentication and health monitoring
- * @param {number} userId - The Roblox user ID
- * @returns {Promise<Object|null>} - Presence data or null
+ * Get player presence data with DEBUG LOGGING
  */
 async function getPlayerPresence(userId) {
+    console.log(`\n🔍 === GETTING PRESENCE FOR USER ${userId} ===`);
+    
     try {
         // Try authenticated request first if available
         if (roblosecurityCookie) {
+            console.log('🔐 Attempting authenticated request...');
+            
             // Ensure we have CSRF token
             if (!csrfToken) {
                 await getCsrfToken();
@@ -185,85 +201,127 @@ async function getPlayerPresence(userId) {
                 authFailureCount = 0;
                 cookieStatus = 'healthy';
                 
-                return authResponse.data.userPresences?.[0] || null;
+                const presence = authResponse.data.userPresences?.[0];
+                if (presence) {
+                    console.log('✅ AUTHENTICATED REQUEST SUCCESS!');
+                    console.log('🔍 === RAW PRESENCE DATA ===');
+                    console.log(JSON.stringify(presence, null, 2));
+                    console.log('🔍 === END RAW DATA ===\n');
+                } else {
+                    console.log('❌ Authenticated request returned no presence data');
+                }
+                
+                return presence || null;
             } catch (authError) {
-                // Track auth failures
-                authFailureCount++;
+                console.log(`❌ Authenticated request failed: ${authError.message}`);
                 
                 // Handle CSRF token refresh
                 if (authError.response?.status === 403 && authError.response?.headers?.['x-csrf-token']) {
+                    console.log('🔄 Refreshing CSRF token and retrying...');
                     csrfToken = authError.response.headers['x-csrf-token'];
                     
-                    const retryResponse = await axios.post(
-                        'https://presence.roblox.com/v1/presence/users',
-                        { userIds: [userId] },
-                        { headers: getAuthHeaders(), timeout: 10000 }
-                    );
-                    
-                    // Mark successful auth after retry
-                    lastAuthSuccess = new Date();
-                    authFailureCount = 0;
-                    cookieStatus = 'healthy';
-                    
-                    return retryResponse.data.userPresences?.[0] || null;
+                    try {
+                        const retryResponse = await axios.post(
+                            'https://presence.roblox.com/v1/presence/users',
+                            { userIds: [userId] },
+                            { headers: getAuthHeaders(), timeout: 10000 }
+                        );
+                        
+                        // Mark successful auth after retry
+                        lastAuthSuccess = new Date();
+                        authFailureCount = 0;
+                        cookieStatus = 'healthy';
+                        
+                        const presence = retryResponse.data.userPresences?.[0];
+                        if (presence) {
+                            console.log('✅ RETRY SUCCESS after CSRF refresh!');
+                            console.log('🔍 === RAW PRESENCE DATA (RETRY) ===');
+                            console.log(JSON.stringify(presence, null, 2));
+                            console.log('🔍 === END RAW DATA ===\n');
+                        }
+                        
+                        return presence || null;
+                    } catch (retryError) {
+                        console.log(`❌ CSRF retry failed: ${retryError.message}`);
+                    }
                 }
                 
                 // Check if cookie expired
                 if (authError.response?.status === 401) {
                     cookieStatus = 'expired';
-                    console.log('🚨 ALERT: Cookie appears to have expired!');
+                    console.log('🚨 COOKIE EXPIRED! Get a new .ROBLOSECURITY cookie!');
                 }
                 
-                // Fall back to unauthenticated if auth fails
+                // Track auth failures
+                authFailureCount++;
             }
         }
         
         // Fallback: Unauthenticated request
+        console.log('⚠️ Falling back to unauthenticated request...');
         const response = await axios.post(
             'https://presence.roblox.com/v1/presence/users',
             { userIds: [userId] },
             { headers: robloxHeaders, timeout: 10000 }
         );
         
-        return response.data.userPresences?.[0] || null;
+        const presence = response.data.userPresences?.[0];
+        if (presence) {
+            console.log('⚠️ UNAUTHENTICATED REQUEST (LIMITED DATA):');
+            console.log('🔍 === RAW PRESENCE DATA (UNAUTH) ===');
+            console.log(JSON.stringify(presence, null, 2));
+            console.log('🔍 === END RAW DATA ===\n');
+        } else {
+            console.log('❌ Unauthenticated request also failed');
+        }
+        
+        return presence || null;
     } catch (error) {
+        console.log(`❌ ALL PRESENCE REQUESTS FAILED: ${error.message}`);
         return null;
     }
 }
 
 /**
  * Generate primary join URL for FBI operations
- * @param {number} userId - The Roblox user ID
- * @param {Object} presence - The presence data
- * @returns {string|null} - Best join URL or null
  */
 function generateJoinUrl(userId, presence) {
+    console.log(`🔗 Generating join URL...`);
+    console.log(`   - PlaceId: ${presence.placeId || 'None'}`);
+    console.log(`   - RootPlaceId: ${presence.rootPlaceId || 'None'}`);
+    
     // Priority order for most reliable joining:
     
     // 1. Direct join using placeId (most reliable for same server)
     if (presence.placeId) {
-        return `https://www.roblox.com/games/start?placeId=${presence.placeId}&launchData=${userId}`;
+        const url = `https://www.roblox.com/games/start?placeId=${presence.placeId}&launchData=${userId}`;
+        console.log(`✅ Generated direct place join: ${url}`);
+        return url;
     }
     
     // 2. Root place join
     if (presence.rootPlaceId) {
-        return `https://www.roblox.com/games/start?placeId=${presence.rootPlaceId}&launchData=${userId}`;
+        const url = `https://www.roblox.com/games/start?placeId=${presence.rootPlaceId}&launchData=${userId}`;
+        console.log(`✅ Generated root place join: ${url}`);
+        return url;
     }
     
     // 3. Social follow (always works)
-    return `https://www.roblox.com/games/start?placeId=0&launchData=follow%3A${userId}`;
+    const url = `https://www.roblox.com/games/start?placeId=0&launchData=follow%3A${userId}`;
+    console.log(`✅ Generated follow join: ${url}`);
+    return url;
 }
 
 /**
- * Check user's online status (SIMPLIFIED FOR FBI OPERATIONS)
- * @param {number} userId - The Roblox user ID
- * @returns {Promise<Object>} - Clean status object
+ * Check user's online status with DEBUG LOGGING
  */
 async function checkRobloxStatus(userId) {
     try {
+        console.log(`\n🕵️ === STARTING STATUS CHECK FOR USER ${userId} ===`);
         const presence = await getPlayerPresence(userId);
         
         if (!presence) {
+            console.log(`❌ No presence data - returning error state`);
             return {
                 online: null,
                 status: 'Account Private or Not Found',
@@ -274,28 +332,41 @@ async function checkRobloxStatus(userId) {
         }
         
         const presenceType = presence.userPresenceType;
+        console.log(`📊 Presence Type: ${presenceType}`);
+        
         let status, game = null, joinUrl = null;
         
         switch(presenceType) {
             case 0: // Offline
                 status = 'Offline';
+                console.log(`🔴 User is OFFLINE`);
                 break;
                 
             case 1: // Online
                 status = 'Online';
                 game = 'Not in game';
+                console.log(`🟢 User is ONLINE but not in game`);
                 break;
                 
             case 2: // In Game
                 status = 'Online';
+                console.log(`🎮 User is IN GAME`);
                 
                 // Get game name from available data
+                console.log(`🔍 Checking game name sources:`);
+                console.log(`   - lastLocation: "${presence.lastLocation || 'None'}"`);
+                console.log(`   - universeId: ${presence.universeId || 'None'}`);
+                console.log(`   - placeId: ${presence.placeId || 'None'}`);
+                
                 if (presence.lastLocation && presence.lastLocation.trim()) {
                     game = presence.lastLocation;
+                    console.log(`✅ Using lastLocation: "${game}"`);
                 } else if (presence.universeId) {
                     game = `Playing a game (Universe: ${presence.universeId})`;
+                    console.log(`⚠️ Using universeId fallback: "${game}"`);
                 } else {
                     game = 'Playing a game (details hidden)';
+                    console.log(`❌ No game details available: "${game}"`);
                 }
                 
                 // Generate join URL for agents
@@ -305,25 +376,37 @@ async function checkRobloxStatus(userId) {
             case 3: // In Studio
                 status = 'Online';
                 game = 'Roblox Studio';
+                console.log(`🔧 User is in STUDIO`);
                 break;
                 
             case 4: // Invisible
                 status = 'Account Private';
+                console.log(`🔒 Account is PRIVATE`);
                 break;
                 
             default:
                 status = 'Unknown';
+                console.log(`❓ UNKNOWN presence type: ${presenceType}`);
         }
         
-        return {
+        const result = {
             online: presenceType === 1 || presenceType === 2 || presenceType === 3,
             status: status,
             game: game,
             joinUrl: joinUrl,
             error: false
         };
+        
+        console.log(`✅ === FINAL RESULT ===`);
+        console.log(`   Status: ${result.status}`);
+        console.log(`   Game: ${result.game || 'None'}`);
+        console.log(`   Join URL: ${result.joinUrl ? 'Generated' : 'None'}`);
+        console.log(`=== END STATUS CHECK ===\n`);
+        
+        return result;
 
     } catch (error) {
+        console.error(`❌ CRITICAL ERROR in status check: ${error.message}`);
         return {
             online: null,
             status: 'API Error',
@@ -336,8 +419,6 @@ async function checkRobloxStatus(userId) {
 
 /**
  * Check if user can make a request (rate limiting)
- * @param {string} userId - Discord user ID
- * @returns {boolean} - True if request allowed
  */
 function checkRateLimit(userId) {
     const now = Date.now();
@@ -353,8 +434,6 @@ function checkRateLimit(userId) {
 
 /**
  * Get remaining cooldown time for a user
- * @param {string} userId - Discord user ID
- * @returns {number} - Remaining cooldown in milliseconds
  */
 function getRemainingCooldown(userId) {
     const now = Date.now();

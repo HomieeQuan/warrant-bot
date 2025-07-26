@@ -4,23 +4,9 @@ const { getCookieStatus, checkCookieHealth } = require('../utils/roblox-api');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('maintenance')
-        .setDescription('Check authentication system health (Admin only)'),
+        .setDescription('Check authentication system health'),
 
     async execute(interaction) {
-        // Admin check - replace with your Discord ID
-        const adminIds = [
-            'YOUR_DISCORD_ID_HERE', // Replace with your actual Discord ID
-            // Add other admin IDs here
-        ];
-        
-        if (!adminIds.includes(interaction.user.id)) {
-            await interaction.reply({ 
-                content: '🚫 Access denied - Admin privileges required', 
-                ephemeral: true 
-            });
-            return;
-        }
-
         await interaction.deferReply({ ephemeral: true });
 
         // Get current cookie status
@@ -125,7 +111,7 @@ module.exports = {
 
         await interaction.editReply({ embeds: [embed] });
 
-        // Log admin check
-        console.log(`🔧 Admin maintenance check by ${interaction.user.tag}`);
+        // Log maintenance check
+        console.log(`🔧 Maintenance check by ${interaction.user.tag}`);
     },
 };
