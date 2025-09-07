@@ -10,6 +10,18 @@ const commandsPath = path.join(__dirname, 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
 for (const file of commandFiles) {
+    // Skip status.js as it's being removed
+    if (file === 'status.js') {
+        console.log(`⏩ Skipping removed command: status`);
+        // Delete the file if it exists
+        const statusPath = path.join(commandsPath, 'status.js');
+        if (fs.existsSync(statusPath)) {
+            fs.unlinkSync(statusPath);
+            console.log(`🗑️ Deleted status.js file`);
+        }
+        continue;
+    }
+    
     const filePath = path.join(commandsPath, file);
     const command = require(filePath);
     
@@ -38,6 +50,7 @@ const rest = new REST().setToken(process.env.DISCORD_TOKEN);
 
         console.log(`✅ Successfully reloaded ${data.length} application (/) commands.`);
         console.log('Commands registered to guild:', process.env.GUILD_ID);
+        console.log('Available commands:', commands.map(c => c.name).join(', '));
         
     } catch (error) {
         console.error('❌ Error deploying commands:', error);

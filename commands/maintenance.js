@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { getCookieStatus, checkCookieHealth } = require('../utils/roblox-api');
+const { checkPermissionSilent } = require('../utils/permissions');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -7,6 +8,11 @@ module.exports = {
         .setDescription('Check authentication system health'),
 
     async execute(interaction) {
+        // Check permissions silently
+        if (await checkPermissionSilent(interaction, 'maintenance')) {
+            return; // Silent denial
+        }
+
         await interaction.deferReply({ ephemeral: true });
 
         // Get current cookie status
